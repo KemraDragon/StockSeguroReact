@@ -41,7 +41,10 @@
   --sidebar-ring: oklch(0.708 0 0);
 }
 
-.dark {
+/* ✅ dark mode supports: .dark AND :root[data-theme="dark"] */
+.dark,
+:root.dark,
+:root[data-theme="dark"] {
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.145 0 0);
@@ -127,11 +130,6 @@
   body {
     @apply bg-background text-foreground;
   }
-
-  /**
-  * Default typography styles for HTML elements (h1-h4, p, label, button, input).
-  * These are in @layer base, so Tailwind utility classes (like text-sm, text-lg) automatically override them.
-  */
 
   html {
     font-size: var(--font-size);

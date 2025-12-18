@@ -1,6 +1,9 @@
 const path = require("path");
 const Database = require("better-sqlite3");
 
+// ✅ IMPORTAR seeds
+const { seedProductsIfNeeded, replaceCatalogSoft } = require("./seedProducts.cjs");
+
 function openDb(app) {
   const dbPath = path.join(app.getPath("userData"), "stockseguro.db");
   const db = new Database(dbPath);
@@ -8,6 +11,9 @@ function openDb(app) {
   db.pragma("journal_mode = WAL");
   db.pragma("synchronous = NORMAL");
 
+  // -----------------------------
+  // TABLAS BASE
+  // -----------------------------
   db.exec(`
     CREATE TABLE IF NOT EXISTS trabajadores (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,35 +45,46 @@ function openDb(app) {
     CREATE INDEX IF NOT EXISTS idx_productos_category ON productos(category);
   `);
 
+  // -----------------------------
+  // TABLAS DE VENTAS
+  // -----------------------------
   db.exec(`
-  CREATE TABLE IF NOT EXISTS ventas (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    trabajador_id INTEGER NOT NULL,
-    total INTEGER NOT NULL,
-    metodo_pago TEXT NOT NULL,
-    monto_recibido INTEGER,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY(trabajador_id) REFERENCES trabajadores(id)
-  );
-`);
+    CREATE TABLE IF NOT EXISTS ventas (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      trabajador_id INTEGER NOT NULL,
+      total INTEGER NOT NULL,
+      metodo_pago TEXT NOT NULL,
+      monto_recibido INTEGER,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(trabajador_id) REFERENCES trabajadores(id)
+    );
+  `);
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS venta_detalle (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    venta_id INTEGER NOT NULL,
-    producto_id TEXT NOT NULL,
-    cantidad INTEGER NOT NULL,
-    precio_unitario INTEGER NOT NULL,
-    subtotal INTEGER NOT NULL,
-    FOREIGN KEY(venta_id) REFERENCES ventas(id),
-    FOREIGN KEY(producto_id) REFERENCES productos(id)
-  );
-`);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS venta_detalle (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      venta_id INTEGER NOT NULL,
+      producto_id TEXT NOT NULL,
+      cantidad INTEGER NOT NULL,
+      precio_unitario INTEGER NOT NULL,
+      subtotal INTEGER NOT NULL,
+      FOREIGN KEY(venta_id) REFERENCES ventas(id),
+      FOREIGN KEY(producto_id) REFERENCES productos(id)
+    );
+  `);
 
-db.exec(`
-  CREATE INDEX IF NOT EXISTS idx_ventas_created_at ON ventas(created_at);
-`);
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_ventas_created_at ON ventas(created_at);
+  `);
 
+  // -----------------------------
+  // ✅ SEED / REEMPLAZO DE CATÁLOGO
+  // -----------------------------
+  if (process.env.RESET_CATALOG === "1") {
+    replaceCatalogSoft(db);
+  } else {
+    seedProductsIfNeeded(db);
+  }
 
   return db;
 }

@@ -1,7 +1,11 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("api", {
-  login: (rut, pin) => ipcRenderer.invoke("auth:login", { rut, pin }),
+  login: (email, password) => ipcRenderer.invoke("auth:login", { email, password }),
   getProducts: () => ipcRenderer.invoke("products:list"),
   completeSale: (payload) => ipcRenderer.invoke("sales:complete", payload),
+
+  createProduct: (payload) => ipcRenderer.invoke("products:create", payload),
+  updateProduct: (payload) => ipcRenderer.invoke("products:update", payload),
+  deleteProduct: (productId) => ipcRenderer.invoke("products:delete", { productId }),
 });
