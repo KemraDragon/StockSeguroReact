@@ -65,7 +65,7 @@ function getCatalog() {
       minStock: 18,
       image: "🍺",
     },
-    
+
     {
       id: "012345678901",
       barcode: "012345678901",

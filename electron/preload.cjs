@@ -8,4 +8,6 @@ contextBridge.exposeInMainWorld("api", {
   createProduct: (payload) => ipcRenderer.invoke("products:create", payload),
   updateProduct: (payload) => ipcRenderer.invoke("products:update", payload),
   deleteProduct: (productId) => ipcRenderer.invoke("products:delete", { productId }),
+
+  adjustStock: (payload) => ipcRenderer.invoke("stock:adjust", payload),
 });

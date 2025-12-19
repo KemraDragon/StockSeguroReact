@@ -244,7 +244,7 @@ export default function LoginView({ onLogin }: { onLogin: (u: User) => void }) {
 
         {/* Footer */}
         <div className="text-center mt-6 text-sm text-gray-500 dark:text-neutral-400">
-          <p>© 2024 StockSeguro - Inventory Management System</p>
+          <p>© 2025 StockSeguro - Inventory Management System</p>
           <p className="mt-1">Professional Liquor Store</p>
         </div>
       </div>

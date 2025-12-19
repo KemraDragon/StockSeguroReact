@@ -55,17 +55,17 @@ export default function App() {
   const cashierName = user ? user.nombre : "";
 
   // ✅ IMPORTANT: Tailwind dark mode uses `.dark` on the root element
-useEffect(() => {
-  const root = document.documentElement;
+  useEffect(() => {
+    const root = document.documentElement;
 
-  if (theme === "dark") {
-    root.classList.add("dark");
-  } else {
-    root.classList.remove("dark");
-  }
+    if (theme === "dark") {
+      root.classList.add("dark");
+    } else {
+      root.classList.remove("dark");
+    }
 
-  localStorage.setItem("theme", theme);
-}, [theme]);
+    localStorage.setItem("theme", theme);
+  }, [theme]);
 
   useEffect(() => {
     let mounted = true;
@@ -203,6 +203,7 @@ useEffect(() => {
         <div className="p-6">
           <StockEntry
             products={products}
+            trabajadorId={user!.id}
             onUpdateStock={handleUpdateStock}
             onRefreshProducts={async () => {
               const res = await window.api.getProducts();
@@ -234,7 +235,6 @@ useEffect(() => {
               cart={cart}
               onUpdateQuantity={updateQuantity}
               onRemoveItem={removeFromCart}
-              onClearItem={removeFromCart}
               onClearCart={clearCart}
             />
           </div>
@@ -273,33 +273,30 @@ useEffect(() => {
             <nav className="flex items-center gap-2 bg-muted p-1 rounded-lg">
               <button
                 onClick={() => setActiveTab("pos")}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                  activeTab === "pos"
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === "pos"
                     ? "bg-background text-primary shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
-                }`}
+                  }`}
               >
                 Point of sale
               </button>
 
               <button
                 onClick={() => setActiveTab("stockEntry")}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                  activeTab === "stockEntry"
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === "stockEntry"
                     ? "bg-background text-primary shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
-                }`}
+                  }`}
               >
                 Stock Entry
               </button>
 
               <button
                 onClick={() => setActiveTab("stockMonitor")}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                  activeTab === "stockMonitor"
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === "stockMonitor"
                     ? "bg-background text-primary shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
-                }`}
+                  }`}
               >
                 Stock in real time
               </button>

@@ -1,4 +1,4 @@
-export {};
+export { };
 
 declare global {
   type SimpleOk = { ok: boolean; error?: string };
@@ -56,6 +56,17 @@ declare global {
       createProduct: (payload: CreateOrUpdateProductPayload) => Promise<SimpleOk>;
       updateProduct: (payload: CreateOrUpdateProductPayload) => Promise<SimpleOk>;
       deleteProduct: (productId: string) => Promise<SimpleOk>;
+
+      adjustStock: (payload: {
+        workerId: number;
+        productId: string;
+        operation: "add" | "subtract";
+        quantity: number;
+        reason?: string;
+      }) => Promise<{
+        ok: boolean;
+        error?: string;
+      }>;
     };
   }
 }

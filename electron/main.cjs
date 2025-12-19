@@ -32,25 +32,28 @@ function seedDemoUserIfNeeded() {
   if (count > 0) return;
 
   const rutDemo = "12.345.678-9";
+  const emailDemo = "kevin@demo.com";
   const pinDemo = "1234";
   const pinHash = bcrypt.hashSync(pinDemo, 10);
 
   db.prepare(
-    `INSERT INTO trabajadores (rut, nombre, pin_hash, activo)
-     VALUES (?, ?, ?, 1)`
-  ).run(rutDemo, "Kevin Demo", pinHash);
+    `INSERT INTO trabajadores (rut, nombre, email, pin_hash, activo)
+   VALUES (?, ?, ?, ?, 1)`
+  ).run(rutDemo, "Kevin Demo", emailDemo, pinHash);
 
   console.log("✅ Usuario demo creado:");
-  console.log(`   RUT: ${rutDemo}`);
+  console.log(`   EMAIL: ${emailDemo}`);
   console.log(`   PIN: ${pinDemo}`);
+  console.log(`   RUT: ${rutDemo}`);
 }
 
 app.whenReady().then(() => {
   db = openDb(app);
 
-  // ✅ Reemplazo seguro del catálogo (USA / English / USD)
-  // (soft-reset: apaga todo, upsert, reactiva el catálogo)
-  replaceCatalogSoft(db);
+  // ✅ Solo resetear catálogo si tú lo pides explícitamente
+  if (process.env.RESET_CATALOG === "1") {
+    replaceCatalogSoft(db);
+  }
 
   // Demo user (solo si no hay usuarios)
   seedDemoUserIfNeeded();
@@ -58,46 +61,46 @@ app.whenReady().then(() => {
   // =======================
   // AUTH
   // =======================
- // =======================
-// AUTH (EMAIL + PIN)
-// =======================
-ipcMain.handle("auth:login", (_e, payload) => {
-  try {
-    const email = String(payload?.email ?? "").trim().toLowerCase();
-    const password = String(payload?.password ?? "").trim();
+  // =======================
+  // AUTH (EMAIL + PIN)
+  // =======================
+  ipcMain.handle("auth:login", (_e, payload) => {
+    try {
+      const email = String(payload?.email ?? "").trim().toLowerCase();
+      const password = String(payload?.password ?? "").trim();
 
-    if (!email) return { ok: false, error: "Please enter your email." };
-    if (!password) return { ok: false, error: "Please enter your password." };
+      if (!email) return { ok: false, error: "Please enter your email." };
+      if (!password) return { ok: false, error: "Please enter your password." };
 
-    const row = db
-      .prepare(
-        `SELECT id, rut, nombre, email, pin_hash, activo
+      const row = db
+        .prepare(
+          `SELECT id, rut, nombre, email, pin_hash, activo
          FROM trabajadores
          WHERE lower(email) = ?
          LIMIT 1`
-      )
-      .get(email);
+        )
+        .get(email);
 
-    if (!row) return { ok: false, error: "Invalid credentials." };
-    if (row.activo !== 1) return { ok: false, error: "User is inactive." };
+      if (!row) return { ok: false, error: "Invalid credentials." };
+      if (row.activo !== 1) return { ok: false, error: "User is inactive." };
 
-    const ok = bcrypt.compareSync(password, row.pin_hash);
-    if (!ok) return { ok: false, error: "Invalid credentials." };
+      const ok = bcrypt.compareSync(password, row.pin_hash);
+      if (!ok) return { ok: false, error: "Invalid credentials." };
 
-    return {
-      ok: true,
-      user: {
-        id: row.id,
-        nombre: row.nombre,
-        email: row.email,
-        rut: row.rut, // compatibilidad legacy
-      },
-    };
-  } catch (e) {
-    console.error("auth:login error", e);
-    return { ok: false, error: "Internal error." };
-  }
-});
+      return {
+        ok: true,
+        user: {
+          id: row.id,
+          nombre: row.nombre,
+          email: row.email,
+          rut: row.rut, // compatibilidad legacy
+        },
+      };
+    } catch (e) {
+      console.error("auth:login error", e);
+      return { ok: false, error: "Internal error." };
+    }
+  });
 
   // =======================
   // PRODUCTS: LIST
@@ -328,6 +331,70 @@ ipcMain.handle("auth:login", (_e, payload) => {
     }
   });
 
+  // =======================
+  // STOCK: ADJUST + LOG
+  // =======================
+  ipcMain.handle("stock:adjust", (_e, payload) => {
+    try {
+      const workerId = Number(payload?.workerId ?? payload?.trabajadorId);
+      const productId = String(payload?.productId ?? "").trim();
+      const operation = String(payload?.operation ?? "").trim(); // 'add' | 'subtract'
+      const quantity = Number(payload?.quantity ?? 0);
+      const reason = String(payload?.reason ?? payload?.motivo ?? "").trim();
+
+      if (!workerId) return { ok: false, error: "Invalid worker." };
+      if (!productId) return { ok: false, error: "Invalid product." };
+      if (!["add", "subtract"].includes(operation)) return { ok: false, error: "Invalid operation." };
+      if (!Number.isFinite(quantity) || quantity <= 0) return { ok: false, error: "Invalid quantity." };
+
+      // Reason required only for subtract
+      if (operation === "subtract" && !reason) {
+        return { ok: false, error: "Please enter a short reason for the stock deduction." };
+      }
+
+      const product = db
+        .prepare("SELECT id, stock, active FROM productos WHERE id = ? AND active = 1")
+        .get(productId);
+
+      if (!product) return { ok: false, error: "Product not found." };
+
+      if (operation === "subtract" && Number(product.stock) < quantity) {
+        return { ok: false, error: `Insufficient stock (available ${product.stock}).` };
+      }
+
+      const createdAt = new Date().toISOString();
+
+      const tx = db.transaction(() => {
+        if (operation === "add") {
+          db.prepare("UPDATE productos SET stock = stock + ? WHERE id = ?").run(quantity, productId);
+        } else {
+          db.prepare("UPDATE productos SET stock = stock - ? WHERE id = ?").run(quantity, productId);
+        }
+
+        db.prepare(
+          `INSERT INTO stock_movimientos (producto_id, trabajador_id, operacion, cantidad, motivo, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+        ).run(
+          productId,
+          workerId,
+          operation,
+          quantity,
+          operation === "subtract" ? reason : null,
+          createdAt
+        );
+
+        const updated = db.prepare("SELECT stock FROM productos WHERE id = ?").get(productId);
+        return Number(updated.stock);
+      });
+
+      const newStock = tx();
+      return { ok: true, newStock };
+    } catch (e) {
+      console.error("stock:adjust error", e);
+      return { ok: false, error: "Internal error adjusting stock." };
+    }
+  });
+
   createWindow();
 
   app.on("activate", () => {
@@ -338,3 +405,4 @@ ipcMain.handle("auth:login", (_e, payload) => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
