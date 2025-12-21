@@ -259,13 +259,14 @@ app.whenReady().then(() => {
       if (!metodoPago) return { ok: false, error: "Método de pago inválido." };
       if (items.length === 0) return { ok: false, error: "Carrito vacío." };
 
+      // 1) Validación + cálculo total (usando DB como fuente de verdad)
       let total = 0;
 
       for (const it of items) {
-        const productId = String(it?.productId ?? "");
+        const productId = String(it?.productId ?? "").trim();
         const qty = Number(it?.quantity ?? 0);
 
-        if (!productId || qty <= 0) {
+        if (!productId || !Number.isFinite(qty) || qty <= 0) {
           return { ok: false, error: "Ítem inválido en el carrito." };
         }
 
@@ -276,48 +277,72 @@ app.whenReady().then(() => {
           .get(productId);
 
         if (!row) return { ok: false, error: `Producto no existe: ${productId}` };
-        if (row.stock < qty) {
+        if (Number(row.stock) < qty) {
           return {
             ok: false,
             error: `Stock insuficiente para ${productId} (disponible ${row.stock}).`,
           };
         }
 
-        total += row.unitPrice * qty;
+        total += Number(row.unitPrice) * qty;
       }
 
       const createdAt = new Date().toISOString();
 
+      // 2) Statements
+      const insertVenta = db.prepare(
+        `INSERT INTO ventas (trabajador_id, total, metodo_pago, monto_recibido, created_at)
+         VALUES (?, ?, ?, ?, ?)`
+      );
+
       const insertDetail = db.prepare(
-  `INSERT INTO venta_detalle (venta_id, producto_id, cantidad, precio_unitario, subtotal)
-   VALUES (?, ?, ?, ?, ?)`
-);
+        `INSERT INTO venta_detalle (venta_id, producto_id, cantidad, precio_unitario, subtotal)
+         VALUES (?, ?, ?, ?, ?)`
+      );
 
-const updateStock = db.prepare(`UPDATE productos SET stock = stock - ? WHERE id = ?`);
+      const updateStock = db.prepare(
+        `UPDATE productos SET stock = stock - ? WHERE id = ? AND active = 1`
+      );
 
-// ✅ NEW: logear salidas por venta en stock_movimientos
-const insertStockMove = db.prepare(
-  `INSERT INTO stock_movimientos (producto_id, trabajador_id, operacion, cantidad, motivo, created_at)
-   VALUES (?, ?, 'subtract', ?, ?, ?)`
-);
+      // Log stock_movimientos (sale)
+      const insertStockMove = db.prepare(
+        `INSERT INTO stock_movimientos (producto_id, trabajador_id, operacion, cantidad, motivo, created_at)
+         VALUES (?, ?, 'subtract', ?, ?, ?)`
+      );
 
-for (const it of items) {
-  const productId = String(it.productId);
-  const qty = Number(it.quantity);
+      // 3) Transacción atómica
+      const tx = db.transaction(() => {
+        const info = insertVenta.run(trabajadorId, total, metodoPago, montoRecibido, createdAt);
+        const ventaId = Number(info.lastInsertRowid);
 
-  const productRow = db
-    .prepare("SELECT unitPrice FROM productos WHERE id = ?")
-    .get(productId);
+        for (const it of items) {
+          const productId = String(it.productId).trim();
+          const qty = Number(it.quantity);
 
-  const unitPrice = Number(productRow.unitPrice);
-  const subtotal = unitPrice * qty;
+          const productRow = db
+            .prepare("SELECT unitPrice, stock FROM productos WHERE id = ? AND active = 1")
+            .get(productId);
 
-  insertDetail.run(ventaId, productId, qty, unitPrice, subtotal);
-  updateStock.run(qty, productId);
+          if (!productRow) throw new Error(`Producto no existe: ${productId}`);
 
-  // ✅ registra movimiento "subtract" con motivo "sale:<ventaId>"
-  insertStockMove.run(productId, trabajadorId, qty, `sale:${ventaId}`, createdAt);
-}
+          const unitPrice = Number(productRow.unitPrice);
+          const subtotal = unitPrice * qty;
+
+          // detalle
+          insertDetail.run(ventaId, productId, qty, unitPrice, subtotal);
+
+          // stock (si por alguna razón cambió entre validación y tx, esto protege)
+          const stockInfo = updateStock.run(qty, productId);
+          if (stockInfo.changes === 0) {
+            throw new Error(`No se pudo descontar stock para ${productId}.`);
+          }
+
+          // movimiento stock
+          insertStockMove.run(productId, trabajadorId, qty, `sale:${ventaId}`, createdAt);
+        }
+
+        return ventaId;
+      });
 
       const ventaId = tx();
       return { ok: true, ventaId, total };

@@ -25,8 +25,8 @@ export function PaymentPanel({
   hasItems,
 }: PaymentPanelProps) {
   const [paymentMethod, setPaymentMethod] = useState<
-    "efectivo" | "tarjeta" | "transferencia"
-  >("efectivo");
+    "Cash" | "tarjeta" | "transferencia"
+  >("Cash");
 
   // input en dólares (ej: "10.00")
   const [receivedAmount, setReceivedAmount] = useState<string>("");
@@ -53,14 +53,14 @@ export function PaymentPanel({
   const handleCompleteSale = () => {
     if (!hasItems) return;
 
-    if (paymentMethod === "efectivo" && receivedCents < totalWithTaxCents) {
+    if (paymentMethod === "Cash" && receivedCents < totalWithTaxCents) {
       alert("The received amount is less than the total (with tax).");
       return;
     }
 
     onCompleteSale(
       paymentMethod,
-      paymentMethod === "efectivo" ? receivedCents : undefined
+      paymentMethod === "Cash" ? receivedCents : undefined
     );
 
     setReceivedAmount("");
@@ -96,9 +96,9 @@ export function PaymentPanel({
         <label className="mb-3 block font-medium">Payment Method</label>
         <div className="grid grid-cols-1 gap-2">
           <button
-            onClick={() => setPaymentMethod("efectivo")}
+            onClick={() => setPaymentMethod("Cash")}
             className={`flex items-center justify-start px-4 py-3 rounded-lg transition-colors ${
-              paymentMethod === "efectivo"
+              paymentMethod === "Cash"
                 ? "bg-green-600 text-white"
                 : "bg-card border border-border text-foreground hover:bg-muted"
             }`}
@@ -134,7 +134,7 @@ export function PaymentPanel({
       </div>
 
       {/* Cash Payment Details */}
-      {paymentMethod === "efectivo" && (
+      {paymentMethod === "Cash" && (
         <div className="mb-6">
           <label htmlFor="received" className="mb-2 block font-medium">
             Amount Received
@@ -197,7 +197,7 @@ export function PaymentPanel({
         <button
           onClick={handleCompleteSale}
           disabled={
-            !hasItems || (paymentMethod === "efectivo" && receivedCents < totalWithTaxCents)
+            !hasItems || (paymentMethod === "Cash" && receivedCents < totalWithTaxCents)
           }
           className="w-full px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
           style={{ minHeight: "48px" }}
