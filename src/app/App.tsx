@@ -267,7 +267,7 @@ export default function App() {
                 {activeTab === "pos"
                   ? "Point Of Sale"
                   : activeTab === "stockEntry"
-                    ? "Ingreso de Stock"
+                    ? "Stock Entry and New Products"
                     : "Stock Seguro Stock In Real Time"}
               </h1>
               <p className="text-sm text-muted-foreground">Cashier System</p>
