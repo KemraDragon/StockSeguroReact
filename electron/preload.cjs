@@ -10,4 +10,8 @@ contextBridge.exposeInMainWorld("api", {
   deleteProduct: (productId) => ipcRenderer.invoke("products:delete", { productId }),
 
   adjustStock: (payload) => ipcRenderer.invoke("stock:adjust", payload),
+  getSalesHistory: (params) => ipcRenderer.invoke("history:sales", params),
+  getStockHistory: (params) => ipcRenderer.invoke("history:stock", params),
+  getMovementsHistory: (params) => ipcRenderer.invoke("history:movements", params),
+
 });

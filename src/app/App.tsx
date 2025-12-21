@@ -8,6 +8,9 @@ import { PaymentPanel } from "./components/PaymentPanel";
 import { StockEntry } from "./components/StockEntry";
 import { StockMonitor } from "./components/StockMonitor";
 import LoginView from "./components/LoginView";
+import { HistoryModal } from "./components/HistoryModal";
+import { History } from "lucide-react";
+
 
 export interface Product {
   id: string;
@@ -39,17 +42,19 @@ function formatUSDFromCents(cents: number) {
 }
 
 export default function App() {
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     const stored = localStorage.getItem("theme");
     return stored === "dark" ? "dark" : "light";
   });
 
   const [user, setUser] = useState<User | null>(null);
-  const [activeTab, setActiveTab] = useState<TabKey>("pos");
+  const isAdmin = user?.email === "admin@stockseguro.com";
 
+  const [activeTab, setActiveTab] = useState<TabKey>("pos");
   const [products, setProducts] = useState<Product[]>([]);
   const [productsLoading, setProductsLoading] = useState(true);
-
   const [cart, setCart] = useState<CartItem[]>([]);
 
   const cashierName = user ? user.nombre : "";
@@ -322,12 +327,30 @@ export default function App() {
               >
                 Close session
               </button>
+
+              {isAdmin && (
+  <button
+    onClick={() => setShowHistoryModal(true)}
+    className="flex items-center gap-2 px-4 py-2 rounded-lg transition-all 
+               bg-gradient-to-r from-purple-600 to-green-600 
+               hover:from-purple-700 hover:to-green-700 
+               text-white shadow-lg hover:shadow-xl"
+    title="View Activity History (Admin Only)"
+  >
+    <History className="h-4 w-4" />
+    <span>History</span>
+  </button>
+)}
             </div>
           </div>
         </div>
       </header>
 
       {renderContent()}
+      {showHistoryModal && isAdmin ? (
+  <HistoryModal onClose={() => setShowHistoryModal(false)} />
+) : null}
+
     </div>
   );
 }

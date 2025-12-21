@@ -288,40 +288,36 @@ app.whenReady().then(() => {
 
       const createdAt = new Date().toISOString();
 
-      const tx = db.transaction(() => {
-        const saleInfo = db
-          .prepare(
-            `INSERT INTO ventas (trabajador_id, total, metodo_pago, monto_recibido, created_at)
-             VALUES (?, ?, ?, ?, ?)`
-          )
-          .run(trabajadorId, total, metodoPago, montoRecibido, createdAt);
+      const insertDetail = db.prepare(
+  `INSERT INTO venta_detalle (venta_id, producto_id, cantidad, precio_unitario, subtotal)
+   VALUES (?, ?, ?, ?, ?)`
+);
 
-        const ventaId = saleInfo.lastInsertRowid;
+const updateStock = db.prepare(`UPDATE productos SET stock = stock - ? WHERE id = ?`);
 
-        const insertDetail = db.prepare(
-          `INSERT INTO venta_detalle (venta_id, producto_id, cantidad, precio_unitario, subtotal)
-           VALUES (?, ?, ?, ?, ?)`
-        );
+// ✅ NEW: logear salidas por venta en stock_movimientos
+const insertStockMove = db.prepare(
+  `INSERT INTO stock_movimientos (producto_id, trabajador_id, operacion, cantidad, motivo, created_at)
+   VALUES (?, ?, 'subtract', ?, ?, ?)`
+);
 
-        const updateStock = db.prepare(`UPDATE productos SET stock = stock - ? WHERE id = ?`);
+for (const it of items) {
+  const productId = String(it.productId);
+  const qty = Number(it.quantity);
 
-        for (const it of items) {
-          const productId = String(it.productId);
-          const qty = Number(it.quantity);
+  const productRow = db
+    .prepare("SELECT unitPrice FROM productos WHERE id = ?")
+    .get(productId);
 
-          const productRow = db
-            .prepare("SELECT unitPrice FROM productos WHERE id = ?")
-            .get(productId);
+  const unitPrice = Number(productRow.unitPrice);
+  const subtotal = unitPrice * qty;
 
-          const unitPrice = Number(productRow.unitPrice);
-          const subtotal = unitPrice * qty;
+  insertDetail.run(ventaId, productId, qty, unitPrice, subtotal);
+  updateStock.run(qty, productId);
 
-          insertDetail.run(ventaId, productId, qty, unitPrice, subtotal);
-          updateStock.run(qty, productId);
-        }
-
-        return Number(ventaId);
-      });
+  // ✅ registra movimiento "subtract" con motivo "sale:<ventaId>"
+  insertStockMove.run(productId, trabajadorId, qty, `sale:${ventaId}`, createdAt);
+}
 
       const ventaId = tx();
       return { ok: true, ventaId, total };
@@ -394,6 +390,221 @@ app.whenReady().then(() => {
       return { ok: false, error: "Internal error adjusting stock." };
     }
   });
+
+  // =======================
+// HISTORY: SALES (paged)
+// =======================
+ipcMain.handle("history:sales", (_e, payload) => {
+  try {
+    const pageSize = Math.max(1, Math.min(50, Number(payload?.pageSize ?? 10)));
+    const page = Math.max(1, Number(payload?.page ?? 1));
+    const offset = (page - 1) * pageSize;
+
+    const totalRow = db.prepare("SELECT COUNT(*) AS count FROM ventas").get();
+    const total = Number(totalRow?.count ?? 0);
+
+    const sales = db
+      .prepare(
+        `SELECT
+           v.id,
+           v.total,
+           v.metodo_pago,
+           v.monto_recibido,
+           v.created_at,
+           t.nombre AS cashier_name,
+           t.email  AS cashier_email
+         FROM ventas v
+         JOIN trabajadores t ON t.id = v.trabajador_id
+         ORDER BY v.created_at DESC
+         LIMIT ? OFFSET ?`
+      )
+      .all(pageSize, offset);
+
+    const saleIds = sales.map((s) => s.id);
+    let detailsBySaleId = new Map();
+
+    if (saleIds.length > 0) {
+      const placeholders = saleIds.map(() => "?").join(",");
+      const details = db
+        .prepare(
+          `SELECT
+             d.venta_id,
+             d.producto_id,
+             d.cantidad,
+             d.precio_unitario,
+             d.subtotal,
+             p.name AS product_name
+           FROM venta_detalle d
+           JOIN productos p ON p.id = d.producto_id
+           WHERE d.venta_id IN (${placeholders})
+           ORDER BY d.id ASC`
+        )
+        .all(...saleIds);
+
+      detailsBySaleId = details.reduce((map, row) => {
+        const key = row.venta_id;
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push({
+          productId: row.producto_id,
+          name: row.product_name,
+          quantity: row.cantidad,
+          unitPrice: row.precio_unitario,
+          subtotal: row.subtotal,
+        });
+        return map;
+      }, new Map());
+    }
+
+    const rows = sales.map((s) => ({
+      id: Number(s.id),
+      total: Number(s.total),
+      paymentMethod: String(s.metodo_pago),
+      receivedAmount: s.monto_recibido === null ? null : Number(s.monto_recibido),
+      createdAt: String(s.created_at),
+      cashier: s.cashier_name ?? "Unknown",
+      cashierEmail: s.cashier_email ?? null,
+      items: detailsBySaleId.get(s.id) ?? [],
+    }));
+
+    return {
+      ok: true,
+      page,
+      pageSize,
+      total,
+      rows,
+    };
+  } catch (e) {
+    console.error("history:sales error", e);
+    return { ok: false, error: "Error loading sales history." };
+  }
+});
+
+// =======================
+// HISTORY: STOCK MOVEMENTS (paged)
+// =======================
+ipcMain.handle("history:stock", (_e, payload) => {
+  try {
+    const pageSize = Math.max(1, Math.min(50, Number(payload?.pageSize ?? 10)));
+    const page = Math.max(1, Number(payload?.page ?? 1));
+    const offset = (page - 1) * pageSize;
+
+    const totalRow = db.prepare("SELECT COUNT(*) AS count FROM stock_movimientos").get();
+    const total = Number(totalRow?.count ?? 0);
+
+    const rows = db
+      .prepare(
+        `SELECT
+           sm.id,
+           sm.producto_id,
+           p.name AS product_name,
+           sm.trabajador_id,
+           t.nombre AS worker_name,
+           t.email  AS worker_email,
+           sm.operacion,
+           sm.cantidad,
+           sm.motivo,
+           sm.created_at
+         FROM stock_movimientos sm
+         JOIN productos p ON p.id = sm.producto_id
+         JOIN trabajadores t ON t.id = sm.trabajador_id
+         ORDER BY sm.created_at DESC
+         LIMIT ? OFFSET ?`
+      )
+      .all(pageSize, offset)
+      .map((r) => ({
+        id: Number(r.id),
+        productId: String(r.producto_id),
+        product: r.product_name ?? "Unknown",
+        workerId: Number(r.trabajador_id),
+        worker: r.worker_name ?? "Unknown",
+        workerEmail: r.worker_email ?? null,
+        operation: String(r.operacion), // add | subtract
+        quantity: Number(r.cantidad),
+        reason: r.motivo ?? null,
+        createdAt: String(r.created_at),
+      }));
+
+    return { ok: true, page, pageSize, total, rows };
+  } catch (e) {
+    console.error("history:stock error", e);
+    return { ok: false, error: "Error loading stock history." };
+  }
+});
+
+// =======================
+// HISTORY: MOVEMENTS (combined view, paged)
+// - Unifica ventas + stock_movimientos
+// =======================
+ipcMain.handle("history:movements", (_e, payload) => {
+  try {
+    const pageSize = Math.max(1, Math.min(50, Number(payload?.pageSize ?? 10)));
+    const page = Math.max(1, Number(payload?.page ?? 1));
+    const offset = (page - 1) * pageSize;
+
+    // total = ventas + stock_movimientos
+    const totalSales = Number(db.prepare("SELECT COUNT(*) AS c FROM ventas").get()?.c ?? 0);
+    const totalStock = Number(db.prepare("SELECT COUNT(*) AS c FROM stock_movimientos").get()?.c ?? 0);
+    const total = totalSales + totalStock;
+
+    // Sacamos ambos sets “sobre-muestreados” y luego mergeamos por created_at desc
+    const sales = db
+      .prepare(
+        `SELECT v.id, v.created_at, t.nombre AS user_name, 'sale' AS kind, v.total AS total
+         FROM ventas v
+         JOIN trabajadores t ON t.id = v.trabajador_id
+         ORDER BY v.created_at DESC
+         LIMIT ? OFFSET 0`
+      )
+      .all(pageSize * 3);
+
+    const stock = db
+      .prepare(
+        `SELECT sm.id, sm.created_at, t.nombre AS user_name, 'stock' AS kind,
+                sm.operacion AS operacion, sm.cantidad AS cantidad, p.name AS product_name, sm.motivo AS motivo
+         FROM stock_movimientos sm
+         JOIN trabajadores t ON t.id = sm.trabajador_id
+         JOIN productos p ON p.id = sm.producto_id
+         ORDER BY sm.created_at DESC
+         LIMIT ? OFFSET 0`
+      )
+      .all(pageSize * 3);
+
+    const merged = [...sales, ...stock]
+      .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+      .slice(offset, offset + pageSize)
+      .map((r) => {
+        if (r.kind === "sale") {
+          return {
+            id: `SALE-${r.id}`,
+            createdAt: String(r.created_at),
+            user: r.user_name ?? "Unknown",
+            action: "Completed sale",
+            details: `Sale completed. Total: ${r.total}`,
+            type: "success",
+          };
+        }
+
+        const op = String(r.operacion);
+        const qty = Number(r.cantidad);
+        const prod = r.product_name ?? "Unknown";
+        const reason = r.motivo ? ` (${r.motivo})` : "";
+
+        return {
+          id: `STK-${r.id}`,
+          createdAt: String(r.created_at),
+          user: r.user_name ?? "Unknown",
+          action: op === "add" ? "Stock added" : "Stock deducted",
+          details: `${op === "add" ? "+" : "-"}${qty} ${prod}${reason}`,
+          type: op === "add" ? "success" : "warning",
+        };
+      });
+
+    return { ok: true, page, pageSize, total, rows: merged };
+  } catch (e) {
+    console.error("history:movements error", e);
+    return { ok: false, error: "Error loading movements history." };
+  }
+});
 
   createWindow();
 
